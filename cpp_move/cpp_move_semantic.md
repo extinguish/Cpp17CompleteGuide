@@ -1228,7 +1228,189 @@ std::string s{"hello"};
 ...
 foo(s); //calls foo(), str becomes a copy of s
 foo(std::move(s)); //calls foo(), s is moved to str
+foo(returnStringByValue()); //calls foo(), return value is moved to str
 ```
+
+If the caller signals that it no longer needs the value of the passed argument (by using `std::move()` or passing a temporary object without a name), the parameter str is initialized with the value moved from the passed argument.   
+That means that with move semantics, `call-by-value` can suddenly become cheap if a temporary object is passed or the passed argument is marked with `std::move()`. Note that just like returning a local object by value, this move can be optimized away. However, if it is not optimized away, the call is guaranteed to be cheap now (if move semantics is cheap).
+Note the following difference:
+```cpp
+void fooByVal(std::string str); //takes the object by value
+void fooByRRef(std::string&& str); //takes the object by rvalue reference
+...
+std::string s1{"hello"}, s2{"hello"};
+...
+fooByVal(std::move(s1)); //s1 is moved
+fooByRRef(std::move(s2)); //s2 might be moved
+```
+
+Here, we compare two functions: one taking the string by value and one taking the string as an `rvalue reference`. In both cases we pass a string with `std::move()`.
+- The function taking the string by value will use move semantics because a new string is created with the value of the passed argument.
+- The function taking the string by rvalue reference **might** use move semantics. Passing the argument does not create a new string. Whether the value of the passed argument is stolen/modified depends on the implementation of the function.
+
+Thus:
+
+- A function declared to support move semantics might not use move semantics.
+- A function declared to take an *argument by value* will use move semantics.
+
+Note again that the effect of move semantics does not guarantee that any optimization happens at all or what the effect of any optimization is. All we know is that the passed object is subsequently in a valid but unspecified state.
+
+### 2.6 Summary
+
+- Rvalue references are declared with `&&` and no const.
+- They can be initialized by temporary objects that do not have a name or non-const objects marked with `std::move()`.
+- Rvalue references extend the lifetime ofobjects returned by value.
+- `std::move()` is a static_cast to the corresponding rvalue reference type. This allows us to pass a named object to an rvalue reference.
+- Objects marked with `std::move()` can also be passed to functions taking the argument by const lvalue reference but not taking a non-const lvalue reference.
+- Objects marked with `std::move()` can also be passed to functions taking the argument by value. In that case, move semantics is used to initialize the parameter, which can make call-by-value pretty cheap.
+- `const rvalue references` are possible but implementing against them usually *makes no sense*.
+- Moved-from objects should be in a valid but unspecified state. The C++ standard library guarantees that for its types. You can still (re)use them providing you do not make any assumptions about their value.
+
+----------------------------------------------------------------
+----------------------------------------------------------------
+
+## Chapter 3 Move Semantics in Classes
+
+This chapter shows how classes can benefit from move semantics. It demonstrates how ordinary classes automatically benefit from move semantics and how to explicitly implement move operations in classes.
+
+### 3.1 Move Semantics in Ordinary Classes
+
+Assume you have quite a simple class with members of types where move semantics can make a difference:
+
+basics/customer.hpp
+```cpp
+#include <string>
+#include <vector>
+#include <iostream>
+#include <cassert>
+class Customer {
+private:
+    std::string name; //name ofthe customer
+    std::vector<int> values; //some values ofthe customer
+public:
+    Customer(const std:: string& n) : name{n} {
+        assert(! name.empty());
+    }
+    std::string getName() const {
+        return name;
+    }
+    void addValue(int val) {
+        values.push_back(val);
+    }
+    friend std::ostream& operator<< (std::ostream& strm, const Customer& cust) {
+        strm <<[ << cust. name << ": ";
+        for (int val : cust. values) {
+            strm << val << ;
+        }
+        strm << ] ;
+        return strm;
+    }
+};
+```
+
+This class has two (potentially) expensive members, a string for the name and a vector of integral values:
+```cpp
+class Customer {
+private:
+    std::string name; //name of the customer
+    std::vector<int> values; //some values of the customer
+    ...
+};
+```
+
+Both members are expensive to copy
+- To copy the name, we have to allocate memory for the characters of the string (unless we have a short name and strings are implemented using the *`small string optimization (SSO)`*).
+- To copy the values, we have to allocate memory for the elements of the vector.
+It would be even more expensive if we had a vector of strings or another pretty expensive element type. For example, a deep copy of a vector of strings would have to allocate memory for both the dynamic array of elements and the memory each element needs.
+The good news is that move semantics is usually automatically supported by such a class. Since C++11, the compiler usually generates a move constructor and a move assignment operator (similar to the automatic generation of a copy constructor and a copying assignment operator).
+
+This has the following effect:
+- Returning a local Customer by value will use move semantics (if it is not optimized away).
+- Passing an unnamed Customer by value will use move semantics (if it is not optimized away).
+- Passing a temporary Customer (e.g., returned by another function) by value will use move semantics (if it is not optimized away).
+- Passing a Customer object marked with `std::move()` by value will use move semantics (if it is not optimized away).
+
+For example:
+
+basics/customer1.cpp
+
+```cpp
+#include "customer.hpp"
+#include <iostream>
+#include <random>
+
+#include <utility> //for std::move()
+
+int main()
+{
+    // create a customer with some initial values:
+    Customer c{"Wolfgang Amadeus Mozart" };
+    for (int val : {0, 8, 15}) {
+        c. addValue(val);
+    }
+    std::cout << "c: " << c << \n ; //print value of initialized c
+    // insert the customer twice into a collection of customers:
+    std::vector<Customer> customers;
+    customers.push_back(c); //copy into the vector
+    customers.push_back(std::move(c)); //move into the vector
+    std::cout << "c: " << c << \n ;//print value ofmoved-from c
+    // print all customers in the collection:
+    std::cout << "customers: \n";
+    for (const Customer& cust : customers) {
+        std::cout << "" << cust << \n ;
+    }
+}
+```
+
+Here we create and initialize a customer `c` (to avoid `SSO`, we use a pretty long name). After the initialization of `c`, the first output is as follows:
+```
+c: [Wolfgang Amadeus Mozart: 0 8 15 ]
+```
+
+We then insert this customer in a vector twice: we copy it once and we move it once:
+```cpp
+customers.push_back(c); //copy into the vector
+customers.push_back(std::move(c)); //move into the vector
+```
+
+Afterwards, the next output of the value of `c` will typically be as follows:
+```
+c: [: ]
+```
+
+With the second call of `push_back()`, both the name and the values were moved away into the second element of the vector. However, do not forget that a moved-from object is in a valid but unspecified state.
+Thus, the second output could have any value name and values:
+- It might still have the same value:
+```
+c: [Wolfgang Amadeus Mozart: 0 8 15 ]
+```
+- It might have a totally different value:
+```
+c: [value was moved away: 0 ]
+```
+
+However, because move semantics is provided to optimize performance and assigning a different value is not necessarily a way to improve performance, it is quite typical that implementations make both the string and the vector empty.
+In any case, we can see that move semantics is automatically enabled for the class Customer. For the
+same reason, it is now guaranteed that the following code is cheap:
+Customer createCustomer()
+{
+Customer c{ ... };
+...
+return c; //uses move semantics ifnot optimized away
+}
+std: :vector<Customer> customers;
+...
+customers. push_back(createCustomer()); //uses move semantics
+See basics/customer2.cpp for the complete example.
+
+
+
+
+
+
+
+
+
 
 
 
