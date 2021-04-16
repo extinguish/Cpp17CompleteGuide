@@ -1389,7 +1389,51 @@ c: [Wolfgang Amadeus Mozart: 0 8 15 ]
 c: [value was moved away: 0 ]
 ```
 
-However, because move semantics is provided to optimize performance and assigning a different value is not necessarily a way to improve performance, it is quite typical that implementations make both the string and the vector empty.
+However, because move semantics is provided to optimize performance and assigning a different value is *not necessarily* a way to improve performance, it is quite typical that implementations make both the string and the vector empty.
+
+> 确实，额外的把move后的对象再赋个值只会增加开销，关键好像也没啥用 -->
+
+In any case, we can see that move semantics is automatically enabled for the `class Customer`. For the same reason, it is now guaranteed that the following code is cheap:
+
+```cpp
+Customer createCustomer() {
+    Customer c{ ... };
+    ...
+    return c; //uses move semantics if not optimized away
+}
+
+std::vector<Customer> customers;
+...
+customers.push_back(createCustomer()); //uses move semantics
+```
+
+See basics/customer2.cpp for the complete example.
+
+The important message is that, since C++11, classes *automatically* benefit from move semantics if they use members that benefit from it. These classes have:
+- A move constructor that moves the members if we create a new object from a source where we no longer need the value:
+```cpp
+Customer c1{ ... }
+...
+Customer c2{std::move(c1)}; //move members of c1 to members of c2
+```
+
+- A move assignment operator that move assigns the members if we assign the value from a source where we no longer need the value.
+```cpp
+Customer c1{ ... }, c2{ ... };
+...
+c2 = std::move(c1); //move assign members of c1 to members of c2
+```
+
+Note thatsuch aclass can benef i teven furtherfrommove semantics by explicitly implementing the following
+improvements:
+• Use move semantics when initializing members
+• Use move semantics to make getters both safe and fast
+3.1.1 When is Move Semantics Automatically Enabled in Classes?
+
+38 Chapter 3: Move Semantics in Classes
+However, because move semantics is provided to optimize performance and assigning a different value is
+not necessarily a way to improve performance, it is quite typical that implementations make both the string
+and the vector empty.
 In any case, we can see that move semantics is automatically enabled for the class Customer. For the
 same reason, it is now guaranteed that the following code is cheap:
 Customer createCustomer()
@@ -1402,6 +1446,32 @@ std: :vector<Customer> customers;
 ...
 customers. push_back(createCustomer()); //uses move semantics
 See basics/customer2.cpp for the complete example.
+The important message is that, since C++11, classes automatically benef i t from move semantics if they
+use members that benef i t from it. These classes have:
+• A move constructor that moves the members ifwe create a new object from a source where we no longer
+need the value:
+Customer c1{ ... }
+...
+Customer c2{std: :move(c1)}; //move members of c1 to members of c2
+• A move assignment operator that move assigns the members if we assign the value from a source where
+we no longer need the value.
+Customer c1{ ... }, c2{ ... };
+...
+c2 = std:: move(c1); //move assign members of c1 to members of c2
+Note thatsuch aclass can benef i teven furtherfrommove semantics by explicitly implementing the following
+improvements:
+• Use move semantics when initializing members
+• Use move semantics to make getters both safe and fast
+
+#### 3.1.1 When is Move Semantics Automatically Enabled in Classes?
+
+As justintroduced, compilers may automatically generate special move memberfunctions (move constructor
+and move assignment operator). However, there are constraints. The constraint is that the compiler has to
+assume that the operations generated do the right thing. The right thing is that we optimize the normal copy
+behavior: instead ofcopying members, we move them because the source values are no longer needed.
+Ifclasses have changed the usual behavior ofcopying or assignment, they probably also have to do some-
+thing different when optimizing these operations. Therefore, the automatic generation of move operations
+is disabled when at least one ofthe following special member functions is user-declared:
 
 
 
